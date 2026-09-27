@@ -36,7 +36,7 @@ If no candidate is convincing, **Export** downloads a JSON file with every recor
 
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.0.zip
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.1.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.
@@ -63,7 +63,7 @@ You don't need to reload the X tab, so you won't drop out of the Space.
 4. Open DevTools on the X tab (F12) → **Console**. Type `XSA` in the filter box to see `[XSA] participants …`, `[XSA] observing Space root …` and so on.
 5. Check the panel:
    - `Space:` shows the Space id, if it's in the URL or a link.
-   - `Root: auto, N labeled tile(s)` means the participant list was found. The rows should list your hosts and speakers with display name, @handle and role.
+   - `Root: auto, root holds N/M labeled tile(s) + K other avatar(s)` means the participant list was found (K should be 0 or close to it). The rows should list your hosts and speakers with display name, @handle and role.
    - If `Root: not found`, click **Pick root**, hover the participant list (a yellow outline shows the choice) and click it.
 6. Click **OBSERVE: off** to turn it **on**. Grey outlines now show each detected tile, and a blue outline shows the root.
 7. Wait **1–2 minutes** while people talk, ideally with several different speakers and some pauses. Watch **Speaking-signal candidates** and **Recent tile mutations**.

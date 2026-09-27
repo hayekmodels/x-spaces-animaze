@@ -42,7 +42,8 @@
   const state = {
     root: null,
     rootSource: 'none', // 'auto' | 'picked' | 'none'
-    rootCandidates: 0,
+    rootHeld: 0,
+    rootOthers: 0,
     labeledTiles: 0,
     spaceIds: [],
     participants: new Map(), // key -> participant
@@ -145,32 +146,42 @@
       }
     }
     state.labeledTiles = tiles.length;
-    if (!tiles.length) return { root: null, candidates: 0 };
-    if (tiles.length === 1) return { root: tiles[0].parentElement, candidates: 1 };
-    // Each tile's anchor = first ancestor containing another tile. Several clusters
-    // can exist (e.g. a Space card in the timeline + the open Space); take the
-    // anchor holding the most tiles, preferring the deeper one on ties.
-    const anchors = new Map();
+    if (!tiles.length) return { root: null, held: 0, others: 0 };
+    // The page can hold role badges outside the open Space (a Space card in the
+    // timeline, "Live on X", ...). Score every ancestor of the labeled tiles by
+    // (labeled tiles inside) − (other avatars inside) and take the best, preferring
+    // the deeper element on ties. The Space's participant grid is almost nothing
+    // but labeled tiles; page-level containers also hold timeline/sidebar avatars.
+    const tileAvatars = new Map(tiles.map((t) => [t, [...avatarSet(t)][0]]));
+    const cands = new Set();
     for (const t of tiles) {
-      let a = t.parentElement;
-      while (a && a !== document.body && !tiles.some((o) => o !== t && a.contains(o))) a = a.parentElement;
-      if (a) anchors.set(a, tiles.filter((o) => a.contains(o)).length);
+      for (let a = t.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) cands.add(a);
     }
     let best = null;
-    let bestN = 0;
-    for (const [a, n] of anchors) {
-      if (n > bestN || (n === bestN && best && best.contains(a))) {
+    let bestScore = -Infinity;
+    let bestHeld = 0;
+    let bestOthers = 0;
+    for (const a of cands) {
+      const inside = tiles.filter((t) => a.contains(t));
+      const labeled = new Set(inside.map((t) => tileAvatars.get(t)));
+      let others = 0;
+      for (const u of avatarSet(a)) if (!labeled.has(u)) others++;
+      const score = inside.length - others;
+      if (score > bestScore || (score === bestScore && best && best.contains(a))) {
         best = a;
-        bestN = n;
+        bestScore = score;
+        bestHeld = inside.length;
+        bestOthers = others;
       }
     }
-    return { root: best, candidates: anchors.size };
+    return { root: best, held: bestHeld, others: bestOthers };
   }
 
   function describeTile(tile) {
     const av = avatarNodes(tile)[0];
     const avatar = av ? avatarUrl(av) : null;
-    const userId = avatar ? (avatar.match(/profile_images\/(\d+)\//) || [])[1] || null : null;
+    // The number in /profile_images/<n>/ identifies the uploaded image, not the user.
+    const avatarId = avatar ? (avatar.match(/\/profile_images\/(\d+)\//) || [])[1] || null : null;
     const texts = [];
     const w = document.createTreeWalker(tile, NodeFilter.SHOW_TEXT);
     for (let n = w.nextNode(); n; n = w.nextNode()) {
@@ -229,16 +240,17 @@
     }
     let displayName = texts.find((t) => t.length <= 50 && !roleOfText(t) && !HANDLE_RE.test(t) && !/^[\d.,]+[KkMm]?$/.test(t)) || null;
     if (!displayName && av && av.alt) displayName = av.alt;
-    const key = username ? `@${username}` : userId ? `id:${userId}` : avatar || displayName || null;
-    return { key, username, usernameSource, displayName, avatar, userId, role: role || 'unknown', roleSource };
+    const key = username ? `@${username}` : avatarId ? `img:${avatarId}` : displayName || null;
+    return { key, username, usernameSource, displayName, avatar, avatarId, role: role || 'unknown', roleSource };
   }
 
   function discover() {
     state.spaceIds = findSpaceIds();
     if (state.rootSource === 'picked' && !(state.root && state.root.isConnected)) state.rootSource = 'none';
     if (state.rootSource !== 'picked') {
-      const { root, candidates } = autoRoot();
-      state.rootCandidates = candidates;
+      const { root, held, others } = autoRoot();
+      state.rootHeld = held;
+      state.rootOthers = others;
       setRoot(root, root ? 'auto' : 'none');
     }
     const found = new Map();
@@ -248,10 +260,11 @@
       for (const av of avatarNodes(state.root)) tiles.add(tileFromAvatar(av, state.root));
       for (const tile of tiles) {
         const d = describeTile(tile);
-        if (!d.key || found.has(d.key)) continue;
-        if (d.role === 'listener') listeners++;
-        found.set(d.key, d);
+        if (!d.key) continue;
+        const prev = found.get(d.key);
+        if (prev && !(prev.role === 'unknown' && d.role !== 'unknown')) continue;
         d.el = tile;
+        found.set(d.key, d);
       }
     }
     // merge, keeping speaking state per key
@@ -271,6 +284,7 @@
         state.participants.set(key, { ...d, speaking: false, offSince: null, lastChange: 0 });
       }
     }
+    for (const d of found.values()) if (d.role === 'listener') listeners++;
     state.listenerCount = listeners;
     const keys = [...state.participants.keys()].join(',');
     if (keys !== state.lastKeys) {
@@ -684,7 +698,7 @@
     $('fill').style.width = `${Math.round((fresh || 0) * 100)}%`;
 
     const rootTxt = state.root
-      ? `${state.rootSource}${state.rootSource === 'auto' ? `, ${state.labeledTiles} labeled tile(s), ${state.rootCandidates} cluster(s)` : ''}`
+      ? `${state.rootSource}${state.rootSource === 'auto' ? `, root holds ${state.rootHeld}/${state.labeledTiles} labeled tile(s) + ${state.rootOthers} other avatar(s)` : ''}`
       : 'not found — expand the Space so participants + role badges are visible, or use Pick root';
     $('info').innerHTML =
       `Space: ${state.spaceIds.length ? esc(state.spaceIds.join(', ')) : 'no /i/spaces/ id in URL or links'}<br>` +
@@ -809,7 +823,7 @@
       url: location.href,
       userAgent: navigator.userAgent,
       settings,
-      space: { ids: state.spaceIds, rootSource: state.rootSource, rootCandidates: state.rootCandidates, labeledTiles: state.labeledTiles, rootHTMLHead: state.root ? state.root.outerHTML.slice(0, 2000) : null },
+      space: { ids: state.spaceIds, rootSource: state.rootSource, rootHeld: state.rootHeld, rootOthers: state.rootOthers, labeledTiles: state.labeledTiles, rootHTMLHead: state.root ? state.root.outerHTML.slice(0, 2000) : null },
       audio: { ...state.audio },
       participants: [...state.participants.values()].map(({ el, ...p }) => ({ ...p, tileHTML: el.outerHTML.slice(0, 30000) })),
       observe: {
