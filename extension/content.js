@@ -59,6 +59,7 @@
     samples: 0,
     stats: new Map(), // feature -> stats
     prev: new Map(), // participant key -> previous feature Set
+    boxes: new Map(), // participant key -> Map<path, relBox>
     levels: [],
     startedAt: null,
   };
@@ -274,12 +275,17 @@
         if (p.speaking) setSpeaking(p, false, 'tile disappeared');
         state.participants.delete(key);
         obs.prev.delete(key);
+        obs.boxes.delete(key);
       }
     }
     for (const [key, d] of found) {
       const p = state.participants.get(key);
       if (p) {
-        if (p.el !== d.el) obs.prev.delete(key);
+        if (p.el !== d.el) {
+          obs.prev.delete(key);
+          obs.boxes.delete(key);
+          p.memo = {};
+        }
         Object.assign(p, d);
       } else {
         state.participants.set(key, { ...d, speaking: false, offSince: null, lastChange: 0 });
@@ -421,12 +427,29 @@
     return (h >>> 0).toString(16).padStart(8, '0');
   }
 
-  function tileFeatures(tile) {
+  // Box of an element relative to its tile, rounded to 0.5px. CSS animations
+  // (e.g. waveform bars scaling with the voice) change this without any DOM
+  // mutation, so "~moving" = box differs from the previous look.
+  function relBox(el, origin) {
+    const r = el.getBoundingClientRect();
+    const q = (v) => Math.round(v * 2) / 2;
+    return `${q(r.left - origin.left)},${q(r.top - origin.top)},${q(r.width)},${q(r.height)}`;
+  }
+
+  // prevBoxes/nextBoxes: Map<path, box> for this tile from the last/current look.
+  function tileFeatures(tile, prevBoxes, nextBoxes) {
     const out = new Set();
     let count = 0;
+    const origin = tile.getBoundingClientRect();
     const walk = (el, path, depth) => {
       if (++count > MAX_TILE_NODES || depth > 16) return;
       elementFeatures(el, path, out);
+      if (nextBoxes) {
+        const b = relBox(el, origin);
+        nextBoxes.set(path, b);
+        const pb = prevBoxes && prevBoxes.get(path);
+        if (pb && pb !== b) out.add(`${path} ~moving`);
+      }
       const ch = el.children;
       for (let i = 0; i < ch.length; i++) walk(ch[i], `${path}>${ch[i].tagName.toLowerCase()}:${i}`, depth + 1);
     };
@@ -446,11 +469,24 @@
     return el;
   }
 
-  function hasFeature(tile, feature) {
+  // memo: per-participant object, used by "~moving" to remember the last box.
+  function hasFeature(tile, feature, memo) {
     const sp = feature.indexOf(' ');
     const path = sp < 0 ? feature : feature.slice(0, sp);
     const el = resolvePath(tile, path);
-    if (!el) return false;
+    if (!el) {
+      if (memo) memo.box = null;
+      return false;
+    }
+    if (feature.endsWith(' ~moving')) {
+      const b = relBox(el, tile.getBoundingClientRect());
+      const prev = memo.box;
+      memo.box = b;
+      if (prev && prev !== b) memo.movedAt = now();
+      // an animation frame may repeat a box between two 100ms looks: count
+      // it as moving if it moved within the last 250ms
+      return memo.movedAt != null && now() - memo.movedAt < 250;
+    }
     const set = new Set();
     elementFeatures(el, path, set);
     return set.has(feature);
@@ -492,7 +528,9 @@
     for (const p of state.participants.values()) {
       // Listeners can't be the active speaker; their reactions/hand-raise badges are noise.
       if (!p.el.isConnected || p.role === 'listener') continue;
-      const cur = tileFeatures(p.el);
+      const boxes = new Map();
+      const cur = tileFeatures(p.el, obs.boxes.get(p.key), boxes);
+      obs.boxes.set(p.key, boxes);
       sets.push(cur);
       const prev = obs.prev.get(p.key);
       obs.prev.set(p.key, cur);
@@ -543,6 +581,7 @@
     obs.samples = 0;
     obs.stats.clear();
     obs.prev.clear();
+    obs.boxes.clear();
     obs.levels = [];
     obs.startedAt = Date.now();
   }
@@ -564,7 +603,7 @@
     const t = now();
     for (const p of state.participants.values()) {
       const neg = settings.rule.startsWith('!');
-      const raw = p.el.isConnected && p.role !== 'listener' && hasFeature(p.el, neg ? settings.rule.slice(1) : settings.rule) !== neg;
+      const raw = p.el.isConnected && p.role !== 'listener' && hasFeature(p.el, neg ? settings.rule.slice(1) : settings.rule, (p.memo ||= {})) !== neg;
       if (raw) {
         p.offSince = null;
         if (!p.speaking) setSpeaking(p, true, 'signal on');

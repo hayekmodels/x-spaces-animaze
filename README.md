@@ -26,8 +26,9 @@ We don't know what X changes in the DOM when someone talks. It could be a class,
    - `T>div:0 style:opacity=1`: inline style
    - `T>div:0 anim:pulse`: running CSS animation or transition (`getAnimations()`)
    - `T>div:0>div:2`: element exists
+   - `T>div:0>i:0 ~moving`: the element's box (size/position inside the tile) changed since the last look. This catches CSS or Web Animations movement, such as waveform bars bouncing with a voice, which never shows up as a DOM mutation.
 2. A feature that appears and disappears inside tiles is tracked. For each one, the probe compares the mean tab-audio level while the feature is present on any tile with the mean while it's absent on all tiles. That difference is **audioΔ**.
-3. The candidates with the highest audioΔ and toggle count are listed in the panel. Clicking **use** makes that feature the speaking signal. It's stored in `chrome.storage.local`.
+3. The candidates with the highest audioΔ and toggle count are listed in the panel. Clicking **use** makes that feature the speaking signal, and **use NOT** means "speaking while the feature is absent" (for example, no muted-mic icon). Only host and speaker tiles are analysed, so listener reactions don't count. It's stored in `chrome.storage.local`.
 4. With a signal chosen, a tile is `SPEAKING` while the feature is present. It becomes `IDLE` after the feature has been absent for 400 ms (`holdMs`).
 
 If no candidate is convincing, **Export** downloads a JSON file with every recorded mutation, feature statistics, the audio-level timeline and each tile's `outerHTML`, so we can analyse it offline.
@@ -36,7 +37,7 @@ If no candidate is convincing, **Export** downloads a JSON file with every recor
 
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.3.zip
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.4.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.

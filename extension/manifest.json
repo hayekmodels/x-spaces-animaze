@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X Spaces Active Speaker Probe",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Experiment: can we identify the active speaker of the X Space open in this tab? Diagnostics only.",
   "minimum_chrome_version": "116",
   "permissions": ["tabCapture", "offscreen", "scripting", "activeTab", "storage"],
