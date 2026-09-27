@@ -28,6 +28,13 @@
   const RESERVED_PATHS = new Set(['i', 'home', 'explore', 'notifications', 'messages', 'settings', 'search', 'compose', 'login', 'logout', 'tos', 'privacy', 'hashtag']);
   const SKIP_ATTRS = new Set(['class', 'style', 'src', 'srcset', 'href']);
 
+  // Default speaking signal, found empirically on a live Space (Sep 2026): X paints
+  // each open-mic speaker's waveform on a <canvas> next to the role label; it is
+  // blank while they are silent and animates while they talk. "*canvas" = the
+  // first canvas in the tile. OBSERVE can still pick a different signal.
+  const DEFAULT_RULE = '*canvas ~canvas-changing';
+  const activeRule = () => settings.rule || DEFAULT_RULE;
+
   const EVAL_MS = 100;
   const SAMPLE_MS = 250;
   const DISCOVER_MS = 1000;
@@ -503,6 +510,7 @@
   }
 
   function resolvePath(tile, path) {
+    if (path === '*canvas') return tile.querySelector('canvas');
     let el = tile;
     const parts = path.split('>');
     for (let k = 1; k < parts.length; k++) {
@@ -674,11 +682,11 @@
 
   function evaluate() {
     measureVoice();
-    if (!settings.rule) return;
+    const rule = activeRule();
     const t = now();
     for (const p of state.participants.values()) {
-      const neg = settings.rule.startsWith('!');
-      const raw = p.el.isConnected && p.role !== 'listener' && hasFeature(p.el, neg ? settings.rule.slice(1) : settings.rule, (p.memo ||= {})) !== neg;
+      const neg = rule.startsWith('!');
+      const raw = p.el.isConnected && p.role !== 'listener' && hasFeature(p.el, neg ? rule.slice(1) : rule, (p.memo ||= {})) !== neg;
       if (raw) {
         p.offSince = null;
         if (!p.speaking) setSpeaking(p, true, 'signal on');
@@ -703,7 +711,7 @@
     for (const p of state.participants.values()) if (p.speaking) setSpeaking(p, false, 'signal changed');
     settings.rule = feature;
     saveSettings();
-    console.info(`${LOG} speaking signal = ${feature ? JSON.stringify(feature) : '(none)'}`);
+    console.info(`${LOG} speaking signal = ${JSON.stringify(activeRule())}${feature ? '' : ' (default)'}`);
     evaluate();
   }
 
@@ -809,9 +817,7 @@
 
     const ps = [...state.participants.values()];
     const speaking = ps.filter((p) => p.speaking).sort((a, b) => b.lastChange - a.lastChange);
-    $('active').textContent = settings.rule
-      ? `ACTIVE SPEAKER: ${speaking.length ? speaking.map(labelOf).join(', ') : '—'}`
-      : 'ACTIVE SPEAKER: ? (no signal chosen yet — use OBSERVE)';
+    $('active').textContent = `ACTIVE SPEAKER: ${speaking.length ? speaking.map(labelOf).join(', ') : '—'}`;
 
     const au = state.audio;
     const fresh = freshLevel();
@@ -830,12 +836,12 @@
     $('info').innerHTML =
       `Space: ${state.spaceIds.length ? esc(state.spaceIds.join(', ')) : 'no /i/spaces/ id in URL or links'}<br>` +
       `Root: ${esc(rootTxt)}${state.rootSource === 'picked' ? ' <button data-a="unpick">auto</button>' : ''}<br>` +
-      `Signal: ${settings.rule ? `${settings.rule.startsWith('!') ? 'speaking while ABSENT: ' : 'speaking while present: '}<code>${esc(settings.rule.replace(/^!/, ''))}</code> <button data-a="clear">clear</button>` : 'none'}`;
+      `Signal: ${activeRule().startsWith('!') ? 'speaking while ABSENT: ' : 'speaking while present: '}<code>${esc(activeRule().replace(/^!/, ''))}</code> ${settings.rule ? '<button data-a="clear">back to default</button>' : '(default: waveform canvas animating)'}`;
 
     const visible = ps.filter((p) => p.role !== 'listener');
     const w = Math.min(24, Math.max(8, ...visible.map((p) => labelOf(p).length)));
     const lines = visible.slice(0, MAX_ROWS).map((p) => {
-      const st = settings.rule ? (p.speaking ? '<span class="sp">SPEAKING</span>' : 'IDLE') : '?';
+      const st = p.speaking ? '<span class="sp">SPEAKING</span>' : 'IDLE';
       const v = p.voice || {};
       const mic = v.canvas ? 'mic:open ' : v.canvas === false ? 'mic:—    ' : '         ';
       const ink = v.ink == null ? '    ' : v.ink.toFixed(2);
@@ -999,7 +1005,7 @@
   chrome.storage.local.get('xsaSettings').then((v) => {
     Object.assign(settings, v.xsaSettings || {});
     if (settings.debug) resetObserve();
-    console.info(`${LOG} probe loaded v${VERSION}; signal=${settings.rule ? JSON.stringify(settings.rule) : '(none)'}; observe=${settings.debug}`);
+    console.info(`${LOG} probe loaded v${VERSION}; signal=${JSON.stringify(activeRule())}${settings.rule ? '' : ' (default)'}; observe=${settings.debug}`);
     discover();
     render(true);
   });

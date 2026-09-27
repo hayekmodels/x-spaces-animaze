@@ -38,13 +38,14 @@ If no candidate is convincing, **Export** downloads a JSON file with every recor
 
 - Participants, @handles and roles come out correctly from the expanded Space panel.
 - **Mic state:** next to the role label X renders an `<svg>` (crossed-out mic) when muted and a `<div><canvas width=24 height=24>` when the mic is open. X swaps them often.
-- **Voice activity:** the waveform is painted on that canvas, so it causes no DOM mutations. The panel rows show `mic:open`, the canvas ink and `~` while it animates. Pick a `~canvas-changing` or `~ink>=…` candidate as the signal.
+- **Voice activity:** the waveform is painted on that canvas, so it causes no DOM mutations. With the mic open, the canvas is **blank while the person is silent** (ink 0.00) and **animates while they talk** (ink ≈0.1–0.4, rising and falling with syllables). In a 24 s capture the talking host's canvas animated in 93 of 97 samples, while two open-mic but silent speakers stayed blank.
+- **Default signal (v0.2.0):** `*canvas ~canvas-changing`, meaning the first `<canvas>` in the tile changed between two looks within the last 300 ms. So open-mic-but-silent counts as IDLE. The panel rows show `mic:open`/`mic:—`, the canvas ink, and `~` while it animates. OBSERVE can still override the signal (**use** / **use NOT**), and **back to default** restores it.
 
 ## Build
 
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.5.zip
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.2.0.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.
