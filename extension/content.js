@@ -427,6 +427,46 @@
     return (h >>> 0).toString(16).padStart(8, '0');
   }
 
+  // X draws the speaker waveform next to the role label on a <canvas>, so the
+  // animation never shows up as a DOM change. Read its pixels instead:
+  //   ink = share of non-transparent pixels (dots "···" → low, tall bars → high)
+  //   sig = fingerprint of the frame, to tell whether it is animating
+  const INK_LEVELS = [0.05, 0.1, 0.15, 0.2, 0.3];
+  const scratch = document.createElement('canvas');
+  const scratchCtx = scratch.getContext('2d', { willReadFrequently: true });
+
+  function canvasStat(cv) {
+    const w = Math.min(64, cv.width || 0);
+    const h = Math.min(64, cv.height || 0);
+    if (!w || !h) return null;
+    try {
+      scratch.width = w;
+      scratch.height = h;
+      scratchCtx.clearRect(0, 0, w, h);
+      scratchCtx.drawImage(cv, 0, 0, w, h);
+      const px = scratchCtx.getImageData(0, 0, w, h).data;
+      let ink = 0;
+      let sig = 0x811c9dc5;
+      for (let i = 3; i < px.length; i += 4) {
+        if (px[i] > 32) ink++;
+        sig = Math.imul(sig ^ (px[i] >> 4), 0x01000193);
+      }
+      return { ink: ink / (w * h), sig: sig >>> 0 };
+    } catch {
+      return null; // tainted canvas
+    }
+  }
+
+  function canvasFeatures(el, path, out, memoMap) {
+    const st = canvasStat(el);
+    if (!st) return;
+    for (const lvl of INK_LEVELS) if (st.ink >= lvl) out.add(`${path} ~ink>=${lvl}`);
+    const key = `${path}#px`;
+    const prev = memoMap && memoMap.get(key);
+    if (memoMap) memoMap.set(key, st.sig);
+    if (prev != null && prev !== st.sig) out.add(`${path} ~canvas-changing`);
+  }
+
   // Box of an element relative to its tile, rounded to 0.5px. CSS animations
   // (e.g. waveform bars scaling with the voice) change this without any DOM
   // mutation, so "~moving" = box differs from the previous look.
@@ -449,6 +489,11 @@
         nextBoxes.set(path, b);
         const pb = prevBoxes && prevBoxes.get(path);
         if (pb && pb !== b) out.add(`${path} ~moving`);
+        if (el.tagName === 'CANVAS') {
+          const prevSig = prevBoxes && prevBoxes.get(`${path}#px`);
+          if (prevSig != null) nextBoxes.set(`${path}#px`, prevSig);
+          canvasFeatures(el, path, out, nextBoxes);
+        }
       }
       const ch = el.children;
       for (let i = 0; i < ch.length; i++) walk(ch[i], `${path}>${ch[i].tagName.toLowerCase()}:${i}`, depth + 1);
@@ -477,6 +522,18 @@
     if (!el) {
       if (memo) memo.box = null;
       return false;
+    }
+    if (feature.endsWith(' ~canvas-changing')) {
+      const st = el.tagName === 'CANVAS' && canvasStat(el);
+      if (!st) return false;
+      if (memo.sig != null && memo.sig !== st.sig) memo.movedAt = now();
+      memo.sig = st.sig;
+      return memo.movedAt != null && now() - memo.movedAt < 300;
+    }
+    const inkM = feature.match(/ ~ink>=([\d.]+)$/);
+    if (inkM) {
+      const st = el.tagName === 'CANVAS' && canvasStat(el);
+      return !!st && st.ink >= Number(inkM[1]);
     }
     if (feature.endsWith(' ~moving')) {
       const b = relBox(el, tile.getBoundingClientRect());
@@ -598,7 +655,25 @@
     if (settings.debug) pushMutation({ t: Date.now(), who: p.key, type: on ? 'SPEAKER_STARTED' : 'SPEAKER_STOPPED', why, lvl: freshLevel() });
   }
 
+  // Live readout for the panel: mic open (a waveform canvas is present) and the
+  // canvas' ink / whether it animated in the last 300ms.
+  function measureVoice() {
+    const t = now();
+    for (const p of state.participants.values()) {
+      if (p.role === 'listener' || !p.el.isConnected) continue;
+      const cv = p.el.querySelector('canvas');
+      const st = cv && canvasStat(cv);
+      const v = (p.voice ||= { sig: null, changedAt: null });
+      v.canvas = !!cv;
+      v.ink = st ? st.ink : null;
+      if (st && v.sig != null && st.sig !== v.sig) v.changedAt = t;
+      v.sig = st ? st.sig : null;
+      v.animating = v.changedAt != null && t - v.changedAt < 300;
+    }
+  }
+
   function evaluate() {
+    measureVoice();
     if (!settings.rule) return;
     const t = now();
     for (const p of state.participants.values()) {
@@ -761,7 +836,10 @@
     const w = Math.min(24, Math.max(8, ...visible.map((p) => labelOf(p).length)));
     const lines = visible.slice(0, MAX_ROWS).map((p) => {
       const st = settings.rule ? (p.speaking ? '<span class="sp">SPEAKING</span>' : 'IDLE') : '?';
-      return `${esc(labelOf(p).slice(0, w).padEnd(w))}  ${ROLE_LABEL[p.role].padEnd(8)}  ${st}`;
+      const v = p.voice || {};
+      const mic = v.canvas ? 'mic:open ' : v.canvas === false ? 'mic:—    ' : '         ';
+      const ink = v.ink == null ? '    ' : v.ink.toFixed(2);
+      return `${esc(labelOf(p).slice(0, w).padEnd(w))}  ${ROLE_LABEL[p.role].padEnd(8)}  ${mic} ${ink}${v.animating ? '~' : ' '}  ${st}`;
     });
     if (visible.length > MAX_ROWS) lines.push(`… +${visible.length - MAX_ROWS} more`);
     if (state.listenerCount) lines.push(`<span class="dim">(${state.listenerCount} listener tile(s) hidden)</span>`);

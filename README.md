@@ -26,6 +26,7 @@ We don't know what X changes in the DOM when someone talks. It could be a class,
    - `T>div:0 style:opacity=1`: inline style
    - `T>div:0 anim:pulse`: running CSS animation or transition (`getAnimations()`)
    - `T>div:0>div:2`: element exists
+   - `T>div:2>div:0>canvas:0 ~canvas-changing` / `~ink>=0.15`: the canvas pixels changed since the last look, or at least 15% of its pixels are drawn. X draws the speaker waveform next to the role label on a 24×24 `<canvas>` (still dots `···` when silent, bouncing bars while talking), and shows a crossed-out mic `<svg>` there when muted.
    - `T>div:0>i:0 ~moving`: the element's box (size/position inside the tile) changed since the last look. This catches CSS or Web Animations movement, such as waveform bars bouncing with a voice, which never shows up as a DOM mutation.
 2. A feature that appears and disappears inside tiles is tracked. For each one, the probe compares the mean tab-audio level while the feature is present on any tile with the mean while it's absent on all tiles. That difference is **audioΔ**.
 3. The candidates with the highest audioΔ and toggle count are listed in the panel. Clicking **use** makes that feature the speaking signal, and **use NOT** means "speaking while the feature is absent" (for example, no muted-mic icon). Only host and speaker tiles are analysed, so listener reactions don't count. It's stored in `chrome.storage.local`.
@@ -33,11 +34,17 @@ We don't know what X changes in the DOM when someone talks. It could be a class,
 
 If no candidate is convincing, **Export** downloads a JSON file with every recorded mutation, feature statistics, the audio-level timeline and each tile's `outerHTML`, so we can analyse it offline.
 
+### Findings so far (live X Space, Sep 2026)
+
+- Participants, @handles and roles come out correctly from the expanded Space panel.
+- **Mic state:** next to the role label X renders an `<svg>` (crossed-out mic) when muted and a `<div><canvas width=24 height=24>` when the mic is open. X swaps them often.
+- **Voice activity:** the waveform is painted on that canvas, so it causes no DOM mutations. The panel rows show `mic:open`, the canvas ink and `~` while it animates. Pick a `~canvas-changing` or `~ink>=…` candidate as the signal.
+
 ## Build
 
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.4.zip
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.5.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.
