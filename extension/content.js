@@ -55,6 +55,7 @@
   const obs = {
     mutations: [],
     mutationTotal: 0,
+    tileMutations: 0,
     samples: 0,
     stats: new Map(), // feature -> stats
     prev: new Map(), // participant key -> previous feature Set
@@ -373,6 +374,7 @@
 
   function pushMutation(rec) {
     obs.mutationTotal++;
+    if (rec.who) obs.tileMutations++;
     obs.mutations.push(rec);
     if (obs.mutations.length > MAX_MUTATIONS) obs.mutations.splice(0, obs.mutations.length - MAX_MUTATIONS);
     if (settings.debug && rec.who) console.debug(LOG, 'mutation', rec);
@@ -394,7 +396,8 @@
     for (const a of el.attributes) {
       if (SKIP_ATTRS.has(a.name)) continue;
       out.add(`${path} [${a.name}]`);
-      if (a.value.length <= 40) out.add(`${path} [${a.name}=${a.value}]`);
+      // long values (e.g. an SVG path's d) are hashed so a swapped icon still shows up
+      out.add(a.value.length <= 40 ? `${path} [${a.name}=${a.value}]` : `${path} [${a.name}#${hash(a.value)}]`);
     }
     const st = el.style;
     if (st) {
@@ -402,14 +405,20 @@
         const prop = st[i];
         const v = st.getPropertyValue(prop);
         out.add(`${path} style:${prop}`);
-        if (v.length <= 40) out.add(`${path} style:${prop}=${v}`);
+        out.add(v.length <= 40 ? `${path} style:${prop}=${v}` : `${path} style:${prop}#${hash(v)}`);
       }
     }
     if (el.getAnimations) {
       for (const an of el.getAnimations()) {
-        if (an.playState === 'running') out.add(`${path} anim:${an.animationName || an.transitionProperty || an.id || 'waapi'}`);
+        out.add(`${path} anim:${an.animationName || an.transitionProperty || an.id || 'waapi'}:${an.playState}`);
       }
     }
+  }
+
+  function hash(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193);
+    return (h >>> 0).toString(16).padStart(8, '0');
   }
 
   function tileFeatures(tile) {
@@ -528,6 +537,7 @@
   function resetObserve() {
     obs.mutations = [];
     obs.mutationTotal = 0;
+    obs.tileMutations = 0;
     obs.samples = 0;
     obs.stats.clear();
     obs.prev.clear();
@@ -720,14 +730,14 @@
     if (!settings.debug || (!force && now() - lastObsRender < 1000)) return;
     lastObsRender = now();
     const cands = candidates(8);
-    const recent = obs.mutations.filter((m) => m.who).slice(-12).reverse();
+    const recent = obs.mutations.slice(-15).reverse();
     o.innerHTML =
-      `<div class="dim">OBSERVE since ${obs.startedAt ? clock(obs.startedAt) : '-'} · samples ${obs.samples} · mutations ${obs.mutationTotal} · toggling features ${obs.stats.size} <button data-a="reset">reset</button></div>` +
+      `<div class="dim">OBSERVE since ${obs.startedAt ? clock(obs.startedAt) : '-'} · samples ${obs.samples} · mutations ${obs.mutationTotal} (in tiles ${obs.tileMutations}) · toggling features ${obs.stats.size} <button data-a="reset">reset</button></div>` +
       `<div style="margin-top:4px"><b>Speaking-signal candidates</b> <span class="dim">(audioΔ = mean level while present − while absent)</span></div>` +
       (cands.length
         ? cands.map((c) => `<div class="c"><button data-a="use" data-f="${esc(c.feature)}">use</button><span>${c.delta == null ? '  n/a' : (c.delta >= 0 ? '+' : '') + c.delta.toFixed(2)} ${String(c.toggles).padStart(4)}tog ${c.tiles}tile ${(c.presence * 100).toFixed(0)}%on</span><code>${esc(c.feature)}</code></div>`).join('')
         : '<div class="dim">none yet — wait for people to talk (start audio capture for audioΔ)</div>') +
-      `<div style="margin-top:4px"><b>Recent tile mutations</b></div><div class="mut">${recent.map((m) => esc(fmtMutation(m))).join('\n') || '<span class="dim">none</span>'}</div>`;
+      `<div style="margin-top:4px"><b>Recent mutations</b> <span class="dim">(who = tile; "-" = outside tiles, path from root R)</span></div><div class="mut">${recent.map((m) => esc(fmtMutation(m))).join('\n') || '<span class="dim">none</span>'}</div>`;
   }
 
   function fmtMutation(m) {
@@ -737,7 +747,7 @@
     else if (m.type === 'childList') what = `children +${m.added.length} -${m.removed.length} ${m.added.concat(m.removed).slice(0, 2).join(' ')}`;
     else if (m.type === 'characterData') what = `text ${JSON.stringify(m.old)} → ${JSON.stringify(m.new)}`;
     else what = m.why || '';
-    return `${clock(m.t)} ${m.who} ${m.type === 'attributes' || m.type === 'childList' || m.type === 'characterData' ? m.path : m.type} ${what}${lvl}`;
+    return `${clock(m.t)} ${m.who || '-'} ${m.type === 'attributes' || m.type === 'childList' || m.type === 'characterData' ? m.path : m.type} ${what}${lvl}`;
   }
 
   // Outlines for the detected root and tiles (OBSERVE mode) and the pick target.
@@ -832,6 +842,7 @@
         candidates: candidates(50),
         featureStats: [...obs.stats.values()].sort((a, b) => b.toggles - a.toggles).slice(0, 1000).map((s) => ({ ...s, tiles: [...s.tiles] })),
         mutationTotal: obs.mutationTotal,
+        tileMutations: obs.tileMutations,
         mutations: obs.mutations,
         levels: obs.levels,
       },
