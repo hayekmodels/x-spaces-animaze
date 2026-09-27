@@ -36,7 +36,7 @@ If no candidate is convincing, **Export** downloads a JSON file with every recor
 
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.2.zip
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.1.3.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.

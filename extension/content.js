@@ -490,7 +490,8 @@
     }
     const sets = [];
     for (const p of state.participants.values()) {
-      if (!p.el.isConnected) continue;
+      // Listeners can't be the active speaker; their reactions/hand-raise badges are noise.
+      if (!p.el.isConnected || p.role === 'listener') continue;
       const cur = tileFeatures(p.el);
       sets.push(cur);
       const prev = obs.prev.get(p.key);
@@ -500,12 +501,12 @@
       for (const f of prev) if (!cur.has(f)) trackToggle(f, p.key);
     }
     for (const s of obs.stats.values()) {
-      let k = 0;
-      for (const set of sets) if (set.has(s.f)) k++;
-      s.tileSamples += sets.length;
-      s.present += k;
-      if (lvl != null) {
-        if (k > 0) {
+      for (const set of sets) {
+        const has = set.has(s.f);
+        s.tileSamples++;
+        if (has) s.present++;
+        if (lvl == null) continue;
+        if (has) {
           s.sumOn += lvl;
           s.nOn++;
         } else {
@@ -516,21 +517,22 @@
     }
   }
 
-  // Features that turn on and off inside tiles, ranked by how much louder the
-  // tab audio is while the feature is present on any tile than while it is absent
-  // on all tiles (audioΔ). Without audio capture they are ranked by toggle count.
+  // Features that turn on and off inside host/speaker tiles, ranked by |audioΔ|:
+  // mean tab-audio level over tile-samples where the feature is present minus
+  // where it is absent. Positive → "present = speaking" (use); negative →
+  // "absent = speaking" (use NOT, e.g. a muted-mic icon). Without audio capture
+  // they are ranked by toggle count.
   function candidates(n = 8) {
     const out = [];
     for (const s of obs.stats.values()) {
       if (s.toggles < 2 || !s.tileSamples) continue;
       const presence = s.present / s.tileSamples;
-      if (presence > 0.9) continue;
       const onMean = s.nOn ? s.sumOn / s.nOn : null;
       const offMean = s.nOff ? s.sumOff / s.nOff : null;
       const delta = s.nOn >= 4 && s.nOff >= 4 ? onMean - offMean : null;
       out.push({ feature: s.f, toggles: s.toggles, tiles: s.tiles.size, presence, onMean, offMean, delta });
     }
-    out.sort((a, b) => (b.delta ?? -9) - (a.delta ?? -9) || b.toggles - a.toggles);
+    out.sort((a, b) => Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0) || b.toggles - a.toggles);
     return out.slice(0, n);
   }
 
@@ -561,7 +563,8 @@
     if (!settings.rule) return;
     const t = now();
     for (const p of state.participants.values()) {
-      const raw = p.el.isConnected && hasFeature(p.el, settings.rule);
+      const neg = settings.rule.startsWith('!');
+      const raw = p.el.isConnected && p.role !== 'listener' && hasFeature(p.el, neg ? settings.rule.slice(1) : settings.rule) !== neg;
       if (raw) {
         p.offSince = null;
         if (!p.speaking) setSpeaking(p, true, 'signal on');
@@ -713,7 +716,7 @@
     $('info').innerHTML =
       `Space: ${state.spaceIds.length ? esc(state.spaceIds.join(', ')) : 'no /i/spaces/ id in URL or links'}<br>` +
       `Root: ${esc(rootTxt)}${state.rootSource === 'picked' ? ' <button data-a="unpick">auto</button>' : ''}<br>` +
-      `Signal: ${settings.rule ? `<code>${esc(settings.rule)}</code> <button data-a="clear">clear</button>` : 'none'}`;
+      `Signal: ${settings.rule ? `${settings.rule.startsWith('!') ? 'speaking while ABSENT: ' : 'speaking while present: '}<code>${esc(settings.rule.replace(/^!/, ''))}</code> <button data-a="clear">clear</button>` : 'none'}`;
 
     const visible = ps.filter((p) => p.role !== 'listener');
     const w = Math.min(24, Math.max(8, ...visible.map((p) => labelOf(p).length)));
@@ -733,9 +736,9 @@
     const recent = obs.mutations.slice(-15).reverse();
     o.innerHTML =
       `<div class="dim">OBSERVE since ${obs.startedAt ? clock(obs.startedAt) : '-'} · samples ${obs.samples} · mutations ${obs.mutationTotal} (in tiles ${obs.tileMutations}) · toggling features ${obs.stats.size} <button data-a="reset">reset</button></div>` +
-      `<div style="margin-top:4px"><b>Speaking-signal candidates</b> <span class="dim">(audioΔ = mean level while present − while absent)</span></div>` +
+      `<div style="margin-top:4px"><b>Speaking-signal candidates</b> <span class="dim">(host/speaker tiles only; audioΔ = level while present − while absent; highlighted button = suggested)</span></div>` +
       (cands.length
-        ? cands.map((c) => `<div class="c"><button data-a="use" data-f="${esc(c.feature)}">use</button><span>${c.delta == null ? '  n/a' : (c.delta >= 0 ? '+' : '') + c.delta.toFixed(2)} ${String(c.toggles).padStart(4)}tog ${c.tiles}tile ${(c.presence * 100).toFixed(0)}%on</span><code>${esc(c.feature)}</code></div>`).join('')
+        ? cands.map((c) => `<div class="c"><button data-a="use" data-f="${esc(c.feature)}"${c.delta > 0 ? ' class="on"' : ''}>use</button><button data-a="use" data-f="!${esc(c.feature)}"${c.delta < 0 ? ' class="on"' : ''}>use NOT</button><span>${c.delta == null ? '  n/a' : (c.delta >= 0 ? '+' : '') + c.delta.toFixed(2)} ${String(c.toggles).padStart(4)}tog ${c.tiles}tile ${(c.presence * 100).toFixed(0)}%on</span><code>${esc(c.feature)}</code></div>`).join('')
         : '<div class="dim">none yet — wait for people to talk (start audio capture for audioΔ)</div>') +
       `<div style="margin-top:4px"><b>Recent mutations</b> <span class="dim">(who = tile; "-" = outside tiles, path from root R)</span></div><div class="mut">${recent.map((m) => esc(fmtMutation(m))).join('\n') || '<span class="dim">none</span>'}</div>`;
   }
