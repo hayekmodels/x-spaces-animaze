@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "X Spaces Active Speaker Probe",
+  "version": "0.1.0",
+  "description": "Experiment: can we identify the active speaker of the X Space open in this tab? Diagnostics only.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabCapture", "offscreen", "scripting", "activeTab", "storage"],
+  "host_permissions": ["https://x.com/*", "https://twitter.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "XSA probe: click to start/stop tab-audio level capture"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
