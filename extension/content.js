@@ -7,11 +7,16 @@
 // the speaking signal is a feature the user picks from OBSERVE-mode candidates.
 (() => {
   'use strict';
-  if (globalThis.__XSA_PROBE__) return; // injected twice (manifest + executeScript)
-  globalThis.__XSA_PROBE__ = true;
-
   const LOG = '[XSA]';
   const VERSION = chrome.runtime.getManifest().version;
+
+  // Injected twice (manifest + executeScript) → keep the running copy. After the
+  // extension is reloaded, the old copy stays in the tab with a dead
+  // chrome.runtime; replace it so the new version actually runs.
+  const prevProbe = globalThis.__XSA_PROBE__;
+  if (prevProbe && prevProbe.version === VERSION && prevProbe.alive()) return;
+  if (prevProbe && prevProbe.stop) prevProbe.stop();
+  const timers = [];
 
   // Exact (trimmed, case-insensitive) text of a role badge. English UI only —
   // add your UI language's words here if the panel shows no roles.
@@ -771,6 +776,7 @@
   </div>
 </div>`;
   const $ = (id) => shadow.getElementById(id);
+  document.querySelectorAll('#xsa-probe-host').forEach((el) => el.remove()); // older copies
   document.documentElement.appendChild(host);
 
   shadow.addEventListener('pointerdown', (e) => {
@@ -1010,10 +1016,23 @@
     render(true);
   });
 
-  setInterval(discover, DISCOVER_MS);
-  setInterval(evaluate, EVAL_MS);
-  setInterval(sample, SAMPLE_MS);
-  setInterval(render, RENDER_MS);
+  timers.push(setInterval(discover, DISCOVER_MS), setInterval(evaluate, EVAL_MS), setInterval(sample, SAMPLE_MS), setInterval(render, RENDER_MS));
+
+  globalThis.__XSA_PROBE__ = {
+    version: VERSION,
+    alive: () => {
+      try {
+        return !!chrome.runtime.id;
+      } catch {
+        return false;
+      }
+    },
+    stop: () => {
+      timers.forEach(clearInterval);
+      if (observer) observer.disconnect();
+      host.remove();
+    },
+  };
 
   // Handy from DevTools (select the extension's context in the console dropdown).
   globalThis.xsa = { state, obs, settings, candidates, setRule, exportData, discover };
