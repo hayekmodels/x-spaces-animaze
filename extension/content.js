@@ -822,7 +822,8 @@
     if (collapsed) return;
 
     const ps = [...state.participants.values()];
-    const speaking = ps.filter((p) => p.speaking).sort((a, b) => b.lastChange - a.lastChange);
+    // loudest first (waveform ink), when several talk at once
+    const speaking = ps.filter((p) => p.speaking).sort((a, b) => ((b.voice && b.voice.ink) || 0) - ((a.voice && a.voice.ink) || 0));
     $('active').textContent = `ACTIVE SPEAKER: ${speaking.length ? speaking.map(labelOf).join(', ') : '—'}`;
 
     const au = state.audio;
