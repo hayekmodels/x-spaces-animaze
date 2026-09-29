@@ -5,6 +5,7 @@
   "description": "Experiment: identify the active speaker of an X Space from a Chrome extension.",
   "type": "module",
   "scripts": {
+    "relay": "node relay/server.mjs",
     "check": "node scripts/build.mjs --check",
     "build": "node scripts/build.mjs"
   },
