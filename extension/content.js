@@ -37,7 +37,9 @@
   // each open-mic speaker's waveform on a <canvas> next to the role label; it is
   // blank while they are silent and animates while they talk. "*canvas" = the
   // first canvas in the tile. OBSERVE can still pick a different signal.
-  const DEFAULT_RULE = '*canvas ~canvas-changing';
+  // Second live Space: idle open-mic "···" dots can animate too, so speaking =
+  // the waveform shows tall bars (see canvasStat's run), not merely "changing".
+  const DEFAULT_RULE = '*canvas ~bars';
   const activeRule = () => settings.rule || DEFAULT_RULE;
 
   const EVAL_MS = 100;
@@ -51,7 +53,7 @@
   const MAX_TILE_NODES = 400;
   const MAX_ROWS = 20;
 
-  const settings = { debug: false, rule: null, holdMs: 400, collapsed: false };
+  const settings = { debug: false, rule: null, holdMs: 400, collapsed: false, barMin: 0.35 };
   const state = {
     root: null,
     rootSource: 'none', // 'auto' | 'picked' | 'none'
@@ -75,6 +77,7 @@
     prev: new Map(), // participant key -> previous feature Set
     boxes: new Map(), // participant key -> Map<path, relBox>
     levels: [],
+    frames: new Map(), // participant key -> [{t, run, ink, png}] waveform canvas snapshots
     startedAt: null,
   };
 
@@ -446,6 +449,7 @@
   //   ink = share of non-transparent pixels (dots "···" → low, tall bars → high)
   //   sig = fingerprint of the frame, to tell whether it is animating
   const INK_LEVELS = [0.05, 0.1, 0.15, 0.2, 0.3];
+  const RUN_LEVELS = [0.2, 0.3, 0.4, 0.5];
   const scratch = document.createElement('canvas');
   const scratchCtx = scratch.getContext('2d', { willReadFrequently: true });
 
@@ -461,11 +465,27 @@
       const px = scratchCtx.getImageData(0, 0, w, h).data;
       let ink = 0;
       let sig = 0x811c9dc5;
-      for (let i = 3; i < px.length; i += 4) {
-        if (px[i] > 32) ink++;
-        sig = Math.imul(sig ^ (px[i] >> 4), 0x01000193);
+      let top = h;
+      let bottom = -1;
+      let run = 0;
+      const colRun = new Array(w).fill(0);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const a = px[(y * w + x) * 4 + 3];
+          sig = Math.imul(sig ^ (a >> 4), 0x01000193);
+          if (a > 32) {
+            ink++;
+            if (y < top) top = y;
+            bottom = y;
+            if (++colRun[x] > run) run = colRun[x];
+          } else {
+            colRun[x] = 0;
+          }
+        }
       }
-      return { ink: ink / (w * h), sig: sig >>> 0 };
+      // h: height of the inked area; run: tallest vertical stroke (a bar). Idle
+      // "···" dots are a thin row (small h/run); talking bars are tall.
+      return { ink: ink / (w * h), sig: sig >>> 0, h: bottom < 0 ? 0 : (bottom - top + 1) / h, run: run / h };
     } catch {
       return null; // tainted canvas
     }
@@ -475,6 +495,7 @@
     const st = canvasStat(el);
     if (!st) return;
     for (const lvl of INK_LEVELS) if (st.ink >= lvl) out.add(`${path} ~ink>=${lvl}`);
+    for (const lvl of RUN_LEVELS) if (st.run >= lvl) out.add(`${path} ~run>=${lvl}`);
     const key = `${path}#px`;
     const prev = memoMap && memoMap.get(key);
     if (memoMap) memoMap.set(key, st.sig);
@@ -538,6 +559,11 @@
       if (memo) memo.box = null;
       return false;
     }
+    if (feature.endsWith(' ~bars')) {
+      const st = el.tagName === 'CANVAS' && canvasStat(el);
+      if (st && st.run >= settings.barMin) memo.barsAt = now();
+      return memo.barsAt != null && now() - memo.barsAt < 300;
+    }
     if (feature.endsWith(' ~canvas-changing')) {
       const st = el.tagName === 'CANVAS' && canvasStat(el);
       if (!st) return false;
@@ -588,9 +614,32 @@
     for (const [f, s] of obs.stats) if (s.toggles <= 2 && s.last < cutoff) obs.stats.delete(f);
   }
 
+  // Waveform canvas snapshots for the export (every 2nd sample ≈ 500ms), so the
+  // bar threshold can be checked against X's real pixels.
+  const MAX_FRAMES = 40;
+  function captureFrames() {
+    for (const p of state.participants.values()) {
+      if (p.role === 'listener' || !p.el.isConnected) continue;
+      const cv = p.el.querySelector('canvas');
+      if (!cv) continue;
+      let png;
+      try {
+        png = cv.toDataURL('image/png');
+      } catch {
+        continue;
+      }
+      const v = p.voice || {};
+      const list = obs.frames.get(p.key) || [];
+      list.push({ t: Date.now(), run: v.run, h: v.h, ink: v.ink, speaking: !!p.speaking, png });
+      if (list.length > MAX_FRAMES) list.shift();
+      obs.frames.set(p.key, list);
+    }
+  }
+
   function sample() {
     if (!settings.debug) return;
     obs.samples++;
+    if (obs.samples % 2 === 0) captureFrames();
     const lvl = freshLevel();
     if (lvl != null) {
       obs.levels.push([Date.now(), Math.round(lvl * 1000) / 1000]);
@@ -655,6 +704,7 @@
     obs.prev.clear();
     obs.boxes.clear();
     obs.levels = [];
+    obs.frames.clear();
     obs.startedAt = Date.now();
   }
 
@@ -681,6 +731,10 @@
       const v = (p.voice ||= { sig: null, changedAt: null });
       v.canvas = !!cv;
       v.ink = st ? st.ink : null;
+      v.run = st ? st.run : null;
+      v.h = st ? st.h : null;
+      if (st && st.run >= settings.barMin) v.barsAt = t;
+      v.bars = v.barsAt != null && t - v.barsAt < 300;
       if (st && v.sig != null && st.sig !== v.sig) v.changedAt = t;
       v.sig = st ? st.sig : null;
       v.animating = v.changedAt != null && t - v.changedAt < 300;
@@ -739,6 +793,7 @@
   .p{font:12px/1.35 ui-monospace,Menlo,Consolas,monospace;color:#e7e9ea;background:rgba(15,20,25,.94);border:1px solid #38444d;border-radius:8px;padding:8px 10px;width:460px;max-height:80vh;overflow:auto;box-shadow:0 4px 18px rgba(0,0,0,.5)}
   .hd{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
   .hd b{margin-right:auto}
+  .hd input{font:inherit;width:48px;color:#e7e9ea;background:#273340;border:1px solid #38444d;border-radius:4px;padding:0 3px}
   button{font:inherit;color:#e7e9ea;background:#273340;border:1px solid #38444d;border-radius:4px;padding:1px 6px;cursor:pointer}
   button.on{background:#1d9bf0;border-color:#1d9bf0}
   .big{font-size:14px;font-weight:bold}
@@ -766,6 +821,7 @@
     <button data-a="debug">OBSERVE: off</button>
     <button data-a="pick">Pick root</button>
     <button data-a="export">Export</button>
+    <label title="Speaking = the waveform's tallest bar reaches this share of its height (idle dots stay below)">bar≥ <input id="barmin" type="number" step="0.05" min="0.05" max="0.95"></label>
     <button data-a="collapse">–</button>
   </div>
   <div id="body">
@@ -778,6 +834,15 @@
   </div>
 </div>`;
   const $ = (id) => shadow.getElementById(id);
+  $('barmin').addEventListener('change', (e) => {
+    const v = Number(e.target.value);
+    if (v > 0 && v < 1) {
+      settings.barMin = v;
+      saveSettings();
+      console.info(`${LOG} bar threshold = ${v}`);
+    }
+    e.target.value = settings.barMin;
+  });
   document.querySelectorAll('#xsa-probe-host').forEach((el) => el.remove()); // older copies
   document.documentElement.appendChild(host);
 
@@ -854,8 +919,9 @@
       const st = p.speaking ? '<span class="sp">SPEAKING</span>' : 'IDLE';
       const v = p.voice || {};
       const mic = v.canvas ? 'mic:open ' : v.canvas === false ? 'mic:—    ' : '         ';
-      const ink = v.ink == null ? '    ' : v.ink.toFixed(2);
-      return `${esc(labelOf(p).slice(0, w).padEnd(w))}  ${ROLE_LABEL[p.role].padEnd(8)}  ${mic} ${ink}${v.animating ? '~' : ' '}  ${st}`;
+      const ink = v.ink == null ? '        ' : `ink ${v.ink.toFixed(2)}`;
+      const bar = v.run == null ? '         ' : `bar ${v.run.toFixed(2)}${v.animating ? '~' : ' '}`;
+      return `${esc(labelOf(p).slice(0, w).padEnd(w))}  ${ROLE_LABEL[p.role].padEnd(8)}  ${mic} ${ink} ${bar}  ${st}`;
     });
     if (visible.length > MAX_ROWS) lines.push(`… +${visible.length - MAX_ROWS} more`);
     if (state.listenerCount) lines.push(`<span class="dim">(${state.listenerCount} listener tile(s) hidden)</span>`);
@@ -981,6 +1047,7 @@
         tileMutations: obs.tileMutations,
         mutations: obs.mutations,
         levels: obs.levels,
+        canvasFrames: Object.fromEntries(obs.frames),
       },
     };
     console.info(`${LOG} export`, data);
@@ -1015,7 +1082,7 @@
       audioLevel: freshLevel(),
       participants: list.map((p) => {
         const v = p.voice || {};
-        const voice = p.speaking && v.ink != null ? Math.min(1, Math.max(0, (v.ink - 0.03) / 0.3)) : 0;
+        const voice = p.speaking && v.run != null ? Math.min(1, Math.max(0.15, (v.run - settings.barMin) / (1 - settings.barMin))) : 0;
         return { key: p.key, username: p.username, displayName: p.displayName, role: p.role, avatar: bigAvatar(p.avatar), mic: !!v.canvas, speaking: !!p.speaking, voice: Math.round(voice * 1000) / 1000 };
       }),
     };
@@ -1049,6 +1116,7 @@
 
   chrome.storage.local.get('xsaSettings').then((v) => {
     Object.assign(settings, v.xsaSettings || {});
+    $('barmin').value = settings.barMin;
     if (settings.debug) resetObserve();
     console.info(`${LOG} probe loaded v${VERSION}; signal=${JSON.stringify(activeRule())}${settings.rule ? '' : ' (default)'}; observe=${settings.debug}`);
     discover();
