@@ -43,6 +43,8 @@ If no candidate is convincing, **Export** downloads a JSON file with every recor
 - The `WebSocket connection to 'ws://127.0.0.1:8787/…' failed` entry under **Errors** on chrome://extensions just means the relay wasn't running at that moment. It's harmless; the extension retries on its own.
 - Superseded (v0.2.0): `*canvas ~canvas-changing`, meaning the first `<canvas>` in the tile changed between two looks within the last 300 ms. So open-mic-but-silent counts as IDLE. The panel rows show `mic:open`/`mic:—`, the canvas ink, and `~` while it animates. OBSERVE can still override the signal (**use** / **use NOT**), and **back to default** restores it.
 
+> **Guía en español para transmitir en YouTube / TikTok:** [docs/TRANSMITIR.md](docs/TRANSMITIR.md)
+
 ## Stream the Space as an animated show (OBS → YouTube / TikTok) — v0.4.0
 
 The stage turns the Space into a talk show:
@@ -79,6 +81,7 @@ Stage URL options:
 - `?body=0`: heads only.
 - `?lang=en`: English labels.
 - `?mouth=0.3`: the fallback mouth line, for photos without a detectable face.
+- `?soon=…`: the text of the "starting soon" card, which is shown while no speaker is on stage so you can go live before the Space starts.
 
 The relay also proxies X profile photos (`/avatar?u=`, only `*.twimg.com`) so the stage can read their pixels, and serves MediaPipe from `node_modules`.
 
@@ -87,7 +90,7 @@ The relay also proxies X profile photos (`/avatar?u=`, only `*.twimg.com`) so th
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
 npm run relay   # local relay + stage for OBS (after npm install)
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.4.0.zip
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.4.1.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.

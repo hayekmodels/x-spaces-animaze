@@ -11,6 +11,7 @@
 //   ?mouth=0.3              fallback jaw line (fraction of head radius below centre) for photos with no detectable face
 //   ?body=0                 heads only (no cartoon bodies)
 //   ?lang=en                English labels (default Spanish)
+//   ?soon=Texto             text of the "starting soon" card shown while no Space is connected
 (() => {
   'use strict';
 
@@ -24,8 +25,8 @@
   const EN = params.get('lang') === 'en';
   const BODY = params.get('body') !== '0';
   const TXT = EN
-    ? { live: 'LIVE', speaking: 'SPEAKING', waiting: 'Waiting for the X Space…', listeners: 'listening', more: 'more', roles: { host: 'HOST', cohost: 'CO-HOST', speaker: 'SPEAKER' } }
-    : { live: 'EN VIVO', speaking: 'HABLANDO', waiting: 'Esperando el Space de X…', listeners: 'escuchando', more: 'más', roles: { host: 'ANFITRIÓN', cohost: 'CO-ANFITRIÓN', speaker: 'SPEAKER' } };
+    ? { live: 'LIVE', speaking: 'SPEAKING', soon: 'STARTING SOON', waiting: 'Waiting for the X Space…', listeners: 'listening', more: 'more', roles: { host: 'HOST', cohost: 'CO-HOST', speaker: 'SPEAKER' } }
+    : { live: 'EN VIVO', speaking: 'HABLANDO', soon: 'EMPEZAMOS PRONTO', waiting: 'Esperando el Space de X…', listeners: 'escuchando', more: 'más', roles: { host: 'ANFITRIÓN', cohost: 'CO-ANFITRIÓN', speaker: 'SPEAKER' } };
   const ACCENT = '#1d9bf0';
   const HOT = '#f91880';
   const FONT = '"Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif';
@@ -485,12 +486,14 @@
 
   // ------------------------------------------------------------ per-frame update
 
+  const stale = () => !DEMO && performance.now() - lastMsgAt > 3000;
+
   function update(t, dt) {
-    const active = [...chars.values()].filter((c) => !c.gone && c.p.speaking);
+    const active = stale() ? [] : [...chars.values()].filter((c) => !c.gone && c.p.speaking);
     const focusX = active.length ? active.reduce((a, c) => a + c.x.x, 0) / active.length : null;
     for (const c of chars.values()) {
       const p = c.p;
-      const speaking = !c.gone && p.speaking;
+      const speaking = !c.gone && p.speaking && !stale();
       // voice level: fast attack, slow release
       const target = speaking ? Math.max(0.3, p.voice || 0) : 0;
       c.level += (target - c.level) * (target > c.level ? 1 - Math.exp(-dt * 30) : 1 - Math.exp(-dt * 5));
@@ -997,7 +1000,7 @@
   function drawMic(c, t) {
     const D = c.D.x;
     if (!BODY || D < 6 || c.alpha.x < 0.02) return;
-    const x = c.x.x + 0.5 * D;
+    const x = c.x.x + 0.62 * D;
     const y = c.y.x;
     const s = c.talk.x;
     ctx.save();
@@ -1007,15 +1010,15 @@
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x, y - 0.3 * D);
-    ctx.lineTo(x - 0.12 * D, y - 0.5 * D);
+    ctx.lineTo(x, y - 0.18 * D);
+    ctx.lineTo(x - 0.1 * D, y - 0.34 * D);
     ctx.stroke();
     ctx.fillStyle = '#1b1e26';
     ctx.beginPath();
     ctx.ellipse(x, y, 0.16 * D, 0.04 * D, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.save();
-    ctx.translate(x - 0.16 * D, y - 0.58 * D);
+    ctx.translate(x - 0.14 * D, y - 0.42 * D);
     ctx.rotate(-0.6);
     if (s > 0.05) {
       ctx.shadowColor = ACCENT;
@@ -1045,7 +1048,7 @@
         const ph = (t * 1.6 + i / 3) % 1;
         ctx.globalAlpha = clamp(c.alpha.x) * (1 - ph) * s * (0.4 + c.level);
         ctx.beginPath();
-        ctx.arc(x - 0.16 * D, y - 0.58 * D, 0.18 * D + ph * 0.45 * D, -0.9, 0.5);
+        ctx.arc(x - 0.14 * D, y - 0.42 * D, 0.18 * D + ph * 0.45 * D, -0.9, 0.5);
         ctx.stroke();
       }
     }
@@ -1109,9 +1112,12 @@
     const name = p.displayName || (p.username ? `@${p.username}` : '');
     const muted = p.mic === false;
     const pad = h * 0.18;
-    let tx = c.x.x;
+    const r = h * 0.2;
+    // text area: right of the muted icon, if any
+    const ax = x + (muted ? pad + 2 * r + pad * 0.6 : pad);
+    const aw = x + w - pad - ax;
+    const tx = ax + aw / 2;
     if (muted) {
-      const r = h * 0.2;
       ctx.fillStyle = '#f4212e';
       ctx.beginPath();
       ctx.arc(x + pad + r, y + h / 2, r, 0, Math.PI * 2);
@@ -1122,19 +1128,22 @@
       ctx.moveTo(x + pad + r * 0.45, y + h / 2 - r * 0.55);
       ctx.lineTo(x + pad + r * 1.55, y + h / 2 + r * 0.55);
       ctx.stroke();
-      tx += r;
     }
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
     const twoLines = h > 34;
     const nameSize = twoLines ? h * 0.36 : h * 0.55;
-    ctx.fillText(fitText(name, w - pad * 2 - (muted ? h * 0.45 : 0), nameSize, 800), tx, twoLines ? y + h * 0.36 : y + h / 2);
+    ctx.fillText(fitText(name, aw, nameSize, 800), tx, twoLines ? y + h * 0.36 : y + h / 2);
     if (twoLines) {
       const role = TXT.roles[p.role] || '';
-      const sub = `${p.username ? `@${p.username}` : ''}${role ? `  ·  ${role}` : ''}`;
+      const handle = p.username ? `@${p.username}` : '';
+      let sub = `${handle}${role ? `  ·  ${role}` : ''}`;
+      // drop the role rather than shrink the handle into illegibility
+      ctx.font = `600 ${h * 0.24}px ${FONT}`;
+      if (handle && ctx.measureText(sub).width > aw) sub = handle;
       ctx.fillStyle = 'rgba(231,233,234,0.75)';
-      ctx.fillText(fitText(sub, w - pad * 2, h * 0.24, 600), tx, y + h * 0.72);
+      ctx.fillText(fitText(sub, aw, h * 0.24, 600), tx, y + h * 0.72);
     }
     ctx.restore();
   }
@@ -1143,7 +1152,7 @@
 
   const lowerThird = { x: new Spring(-1, 60), who: null };
 
-  function drawOverlays(t) {
+  function drawOverlays(t, dt) {
     const pad = VERTICAL ? 40 : 36;
     // LIVE badge
     const bh = VERTICAL ? 64 : 52;
@@ -1184,7 +1193,7 @@
     // lower third: who is talking
     const who = featured && featured.talk.x > 0.3 ? featured : null;
     if (who) lowerThird.who = who;
-    const lx = lowerThird.x.step(who ? 0 : -1, 1 / 60);
+    const lx = lowerThird.x.step(who ? 0 : -1, dt);
     const c = lowerThird.who;
     if (c && lx > -0.99) {
       const p = c.p;
@@ -1238,14 +1247,65 @@
       ctx.restore();
     }
 
-    if (!DEMO && performance.now() - lastMsgAt > 3000) {
-      ctx.save();
-      ctx.font = `700 ${VERTICAL ? 40 : 32}px ${FONT}`;
-      ctx.fillStyle = 'rgba(231,233,234,0.7)';
-      ctx.textAlign = 'center';
-      ctx.fillText(TXT.waiting, W / 2, H / 2);
-      ctx.restore();
+  }
+
+  // "Starting soon" card: shown while no speaker is on stage (Space not open
+  // yet, or the extension/relay not connected), so you can go live early.
+  const soonAlpha = new Spring(1, 20);
+  function drawSoon(t, dt, visible) {
+    const a = soonAlpha.step(visible ? 1 : 0, dt);
+    if (a < 0.03) return;
+    const cx = W / 2;
+    const cy = H * (VERTICAL ? 0.46 : 0.52);
+    const R = Math.min(W, H) * (VERTICAL ? 0.2 : 0.17);
+    ctx.save();
+    ctx.globalAlpha = a;
+    // pulsing rings
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * 0.35 + i / 3) % 1;
+      ctx.strokeStyle = i % 2 ? HOT : ACCENT;
+      ctx.globalAlpha = a * (1 - ph) * 0.6;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * (0.7 + ph * 0.9), 0, Math.PI * 2);
+      ctx.stroke();
     }
+    ctx.globalAlpha = a;
+    // orbiting dots
+    for (let i = 0; i < 12; i++) {
+      const ang = t * 0.8 + (i / 12) * Math.PI * 2;
+      ctx.fillStyle = i % 2 ? HOT : ACCENT;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(ang) * R * 0.62, cy + Math.sin(ang) * R * 0.62, R * 0.04 * (1 + 0.5 * Math.sin(t * 3 + i)), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // microphone glyph
+    ctx.fillStyle = '#fff';
+    roundRect(cx - R * 0.13, cy - R * 0.36, R * 0.26, R * 0.46, R * 0.13);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = R * 0.05;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy - R * 0.02, R * 0.24, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.moveTo(cx, cy + R * 0.22);
+    ctx.lineTo(cx, cy + R * 0.34);
+    ctx.stroke();
+    // text
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 16;
+    const big = VERTICAL ? 92 : 84;
+    const g = ctx.createLinearGradient(cx - W * 0.3, 0, cx + W * 0.3, 0);
+    g.addColorStop(0, ACCENT);
+    g.addColorStop(1, HOT);
+    ctx.fillStyle = g;
+    const soon = params.get('soon') || TXT.soon;
+    ctx.fillText(fitText(soon, W * 0.9, big, 900), cx, cy + R * 1.35);
+    ctx.fillStyle = 'rgba(231,233,234,0.85)';
+    ctx.fillText(fitText(params.get('title') || 'X Space', W * 0.85, big * 0.45, 700), cx, cy + R * 1.35 + big * 0.95);
+    ctx.restore();
   }
 
   // ------------------------------------------------------------ loop
@@ -1268,7 +1328,8 @@
     }
     // characters on their way out
     for (const c of chars.values()) if (!c.row || c.row.hidden) drawChar(c, t);
-    drawOverlays(t);
+    drawSoon(t, dt, !rows.some((r) => r.members.length));
+    drawOverlays(t, dt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -1314,7 +1375,7 @@
     }, 50);
   }
 
-  window.__stage = { chars }; // for automated tests
+  window.__stage = { chars, soonAlpha }; // for automated tests
   if (DEMO) demo();
   else connect();
 })();
