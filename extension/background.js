@@ -114,6 +114,53 @@ chrome.action.onClicked.addListener(async (tab) => {
   await startCapture(tab);
 });
 
+// ------------------------------------------------------------ stage relay
+// Content scripts send XSA_STATE ~20x/s; forward it to the local relay
+// (npm run relay), which serves the OBS stage page.
+
+const RELAY_URL = 'ws://127.0.0.1:8787/ws?role=source';
+let relay = null;
+let relayRetryAt = 0;
+let relayBackoff = 1000;
+
+function relayStatus() {
+  return relay && relay.readyState === WebSocket.OPEN ? 'connected' : 'offline';
+}
+
+function ensureRelay() {
+  if (relay && (relay.readyState === WebSocket.OPEN || relay.readyState === WebSocket.CONNECTING)) return;
+  if (Date.now() < relayRetryAt) return;
+  try {
+    relay = new WebSocket(RELAY_URL);
+  } catch {
+    relay = null;
+    relayRetryAt = Date.now() + relayBackoff;
+    return;
+  }
+  relay.onopen = () => {
+    relayBackoff = 1000;
+    console.info('[XSA] relay connected');
+  };
+  relay.onclose = () => {
+    relay = null;
+    relayRetryAt = Date.now() + relayBackoff;
+    relayBackoff = Math.min(10000, relayBackoff * 2);
+  };
+  relay.onerror = () => {}; // onclose follows
+}
+
+function forwardState(state) {
+  ensureRelay();
+  // drop frames rather than queue them if the relay is slow
+  if (relayStatus() === 'connected' && relay.bufferedAmount === 0) relay.send(JSON.stringify({ type: 'state', state }));
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg || msg.type !== 'XSA_STATE') return;
+  forwardState(msg.state);
+  sendResponse({ relay: relayStatus() });
+});
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.source !== 'offscreen') return;
   if (msg.type === 'XSA_ENDED' || msg.type === 'XSA_ERROR') {

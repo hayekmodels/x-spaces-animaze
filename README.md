@@ -41,11 +41,41 @@ If no candidate is convincing, **Export** downloads a JSON file with every recor
 - **Voice activity:** the waveform is painted on that canvas, so it causes no DOM mutations. With the mic open, the canvas is **blank while the person is silent** (ink 0.00) and **animates while they talk** (ink ≈0.1–0.4, rising and falling with syllables). In a 24 s capture the talking host's canvas animated in 93 of 97 samples, while two open-mic but silent speakers stayed blank.
 - **Default signal (v0.2.0):** `*canvas ~canvas-changing`, meaning the first `<canvas>` in the tile changed between two looks within the last 300 ms. So open-mic-but-silent counts as IDLE. The panel rows show `mic:open`/`mic:—`, the canvas ink, and `~` while it animates. OBSERVE can still override the signal (**use** / **use NOT**), and **back to default** restores it.
 
+## Stream the avatars with OBS (v0.3.0)
+
+Every host and speaker becomes a 2D avatar made from their X profile photo, all on one 1920×1080 stage page:
+- The person talking gets bigger and bounces, their head wobbles, and a glowing ring with equaliser bars follows **their own** voice level (the ink of X's waveform canvas).
+- Everyone else breathes gently and is dimmed. Muted speakers get a red mic badge.
+
+```
+x.com tab → extension → ws://127.0.0.1:8787 (relay, Node) → http://127.0.0.1:8787/ (stage) → OBS Browser Source
+```
+
+1. **Once:** install [Node.js](https://nodejs.org) 18 or newer, then run `npm install` in this repo.
+2. **Start the relay** and keep the terminal open: `npm run relay`.
+3. **Chrome:** open the X Space as before (expand the participant panel). The extension panel should say `Stage relay: connected`. Audio capture (the icon) is optional for the stage.
+4. **OBS → Sources → + → Browser:**
+   - URL `http://127.0.0.1:8787/`
+   - Width 1920, Height 1080
+   - Turn on "Refresh browser when scene becomes active".
+5. **Audio in OBS:**
+   - Windows: add *Application Audio Capture* → Chrome.
+   - macOS/Linux: add *Desktop Audio*.
+   - The avatars follow X's own waveform, so they're in sync with what Chrome plays.
+6. Stream from OBS to YouTube, Twitch or X as usual.
+
+Stage URL options:
+- `?demo=1`: fake speakers, to set up OBS without a live Space.
+- `?bg=transparent`: transparent background, for your own scene.
+- `?bg=%23000000`: any background colour.
+- `?names=0`: hide the names.
+
 ## Build
 
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.2.2.zip
+npm run relay   # local relay + stage for OBS (after npm install)
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.3.0.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.
@@ -110,5 +140,7 @@ extension/
   offscreen.html   hosts offscreen.js
   offscreen.js     getUserMedia(tab) → AnalyserNode → level; replays audio to speakers
   content.js       discovery, panel, speaking state, OBSERVE instrumentation, export
+relay/server.mjs   local WebSocket relay + static server for the stage (npm run relay)
+stage/             OBS stage: index.html, stage.js (avatars + gestures), stage.css
 scripts/build.mjs  validation + packaging
 ```

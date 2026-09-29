@@ -30,11 +30,14 @@ const referenced = [
 ];
 for (const f of referenced) if (!existsSync(join(src, f))) fail(`missing file extension/${f}`);
 
-for (const f of readdirSync(src).filter((f) => f.endsWith('.js'))) {
-  const r = spawnSync(process.execPath, ['--check', join(src, f)], { encoding: 'utf8' });
-  if (r.status !== 0) fail(`syntax error in ${f}\n${r.stderr}`);
+for (const dir of ['extension', 'relay', 'stage']) {
+  for (const f of readdirSync(join(root, dir)).filter((f) => /\.m?js$/.test(f))) {
+    const r = spawnSync(process.execPath, ['--check', join(root, dir, f)], { encoding: 'utf8' });
+    if (r.status !== 0) fail(`syntax error in ${dir}/${f}\n${r.stderr}`);
+  }
 }
-console.log(`✓ extension/ ok (v${manifest.version})`);
+if (!existsSync(join(root, 'stage', 'index.html'))) fail('missing stage/index.html');
+console.log(`✓ extension/, relay/, stage/ ok (v${manifest.version})`);
 if (checkOnly) process.exit(0);
 
 const out = join(dist, 'x-spaces-probe');

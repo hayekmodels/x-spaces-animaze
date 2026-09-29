@@ -41,6 +41,7 @@
   const activeRule = () => settings.rule || DEFAULT_RULE;
 
   const EVAL_MS = 100;
+  const PUBLISH_MS = 50;
   const SAMPLE_MS = 250;
   const DISCOVER_MS = 1000;
   const RENDER_MS = 200;
@@ -60,6 +61,7 @@
     spaceIds: [],
     participants: new Map(), // key -> participant
     listenerCount: 0,
+    relay: null, // 'connected' | 'offline' | null (not publishing)
     audio: { on: false, level: 0, rms: 0, peak: 0, hz: 0, t: 0, error: null },
     picking: false,
     lastKeys: '',
@@ -843,6 +845,7 @@
     $('info').innerHTML =
       `Space: ${state.spaceIds.length ? esc(state.spaceIds.join(', ')) : 'no /i/spaces/ id in URL or links'}<br>` +
       `Root: ${esc(rootTxt)}${state.rootSource === 'picked' ? ' <button data-a="unpick">auto</button>' : ''}<br>` +
+      `Stage relay: ${state.relay === 'connected' ? '<span class="sp">connected</span> (OBS stage gets the avatars)' : state.relay === 'offline' ? 'offline — run <code>npm run relay</code>' : '—'}<br>` +
       `Signal: ${activeRule().startsWith('!') ? 'speaking while ABSENT: ' : 'speaking while present: '}<code>${esc(activeRule().replace(/^!/, ''))}</code> ${settings.rule ? '<button data-a="clear">back to default</button>' : '(default: waveform canvas animating)'}`;
 
     const visible = ps.filter((p) => p.role !== 'listener');
@@ -991,6 +994,41 @@
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
+  // ------------------------------------------------------------- publish
+  // Hosts/speakers with speaking state and a 0..1 voice level (waveform ink),
+  // sent to background.js, which forwards it to the local relay → OBS stage.
+
+  const bigAvatar = (u) => (u ? u.replace(/_(normal|bigger|mini|reasonably_small|x\d+|\d+x\d+)(?=\.\w+$)/, '_400x400') : null);
+  let publishedEmpty = false;
+
+  function publishState() {
+    const list = [...state.participants.values()].filter((p) => p.role !== 'listener' && p.el.isConnected);
+    if (!list.length) {
+      if (publishedEmpty) return;
+      publishedEmpty = true;
+    } else {
+      publishedEmpty = false;
+    }
+    const st = {
+      t: Date.now(),
+      spaceId: state.spaceIds[0] || null,
+      audioLevel: freshLevel(),
+      participants: list.map((p) => {
+        const v = p.voice || {};
+        const voice = p.speaking && v.ink != null ? Math.min(1, Math.max(0, (v.ink - 0.03) / 0.3)) : 0;
+        return { key: p.key, username: p.username, displayName: p.displayName, role: p.role, avatar: bigAvatar(p.avatar), mic: !!v.canvas, speaking: !!p.speaking, voice: Math.round(voice * 1000) / 1000 };
+      }),
+    };
+    try {
+      chrome.runtime.sendMessage({ type: 'XSA_STATE', state: st }).then(
+        (r) => (state.relay = r && r.relay ? r.relay : 'offline'),
+        () => (state.relay = null),
+      );
+    } catch {
+      state.relay = null; // extension reloaded; this copy is stale
+    }
+  }
+
   // -------------------------------------------------------------- messages
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -1017,7 +1055,7 @@
     render(true);
   });
 
-  timers.push(setInterval(discover, DISCOVER_MS), setInterval(evaluate, EVAL_MS), setInterval(sample, SAMPLE_MS), setInterval(render, RENDER_MS));
+  timers.push(setInterval(publishState, PUBLISH_MS), setInterval(discover, DISCOVER_MS), setInterval(evaluate, EVAL_MS), setInterval(sample, SAMPLE_MS), setInterval(render, RENDER_MS));
 
   globalThis.__XSA_PROBE__ = {
     version: VERSION,

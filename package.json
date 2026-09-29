@@ -1,11 +1,14 @@
 {
   "name": "x-spaces-animaze",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Experiment: identify the active speaker of an X Space from a Chrome extension.",
   "type": "module",
   "scripts": {
     "check": "node scripts/build.mjs --check",
     "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   }
 }
