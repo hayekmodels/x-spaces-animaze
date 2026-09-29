@@ -1079,6 +1079,7 @@
     const st = {
       t: Date.now(),
       spaceId: state.spaceIds[0] || null,
+      listenerCount: state.listenerCount,
       audioLevel: freshLevel(),
       participants: list.map((p) => {
         const v = p.voice || {};

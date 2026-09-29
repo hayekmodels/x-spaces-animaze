@@ -43,41 +43,51 @@ If no candidate is convincing, **Export** downloads a JSON file with every recor
 - The `WebSocket connection to 'ws://127.0.0.1:8787/…' failed` entry under **Errors** on chrome://extensions just means the relay wasn't running at that moment. It's harmless; the extension retries on its own.
 - Superseded (v0.2.0): `*canvas ~canvas-changing`, meaning the first `<canvas>` in the tile changed between two looks within the last 300 ms. So open-mic-but-silent counts as IDLE. The panel rows show `mic:open`/`mic:—`, the canvas ink, and `~` while it animates. OBSERVE can still override the signal (**use** / **use NOT**), and **back to default** restores it.
 
-## Stream the avatars with OBS (v0.3.0)
+## Stream the Space as an animated show (OBS → YouTube / TikTok) — v0.4.0
 
-Every host and speaker becomes a 2D avatar made from their X profile photo, all on one 1920×1080 stage page:
-- The person talking gets bigger and bounces, their head wobbles, and a glowing ring with equaliser bars follows **their own** voice level (the ink of X's waveform canvas).
-- Everyone else breathes gently and is dimmed. Muted speakers get a red mic badge.
+The stage turns the Space into a talk show:
+- **Characters:** each host and speaker is a "bobblehead" character. The head is their **X profile photo, animated**. Google MediaPipe's face landmarker finds the face in each photo, and while that person talks:
+  - their **real lower lip and chin drop** in sync with their own voice (teeth and tongue show);
+  - their **brows pop** on emphasis;
+  - they **blink**, and their head bobs, tilts and nods.
+- **Bodies:** a cartoon body with arms **gestures** while they talk: explaining, pointing, shrugging, counting.
+- **Listeners** breathe, nod and turn toward whoever is talking.
+- **No face in the photo:** logos and landscapes get a simple puppet mouth instead.
+- **Studio:** everyone sits behind a desk with mics and nameplates. The speaker moves to the front row and gets a spotlight.
+- **Overlays:** an EN VIVO badge, the title, the listener count, and a lower third with the name of whoever is talking.
 
 ```
-x.com tab → extension → ws://127.0.0.1:8787 (relay, Node) → http://127.0.0.1:8787/ (stage) → OBS Browser Source
+x.com tab → extension → ws://127.0.0.1:8787 (relay, Node) → stage page → OBS Browser Source → YouTube / TikTok
 ```
 
 1. **Once:** install [Node.js](https://nodejs.org) 18 or newer, then run `npm install` in this repo.
-2. **Start the relay** and keep the terminal open: `npm run relay`.
-3. **Chrome:** open the X Space as before (expand the participant panel). The extension panel should say `Stage relay: connected`. Audio capture (the icon) is optional for the stage.
+2. **Start the relay** and keep the window open: `npm run relay`. On its first start it downloads the face model (~4 MB) into `relay/.cache/`.
+3. **Chrome:** open the X Space with the participant panel expanded. The extension panel should say `Stage relay: connected`.
 4. **OBS → Sources → + → Browser:**
-   - URL `http://127.0.0.1:8787/`
-   - Width 1920, Height 1080
-   - Turn on "Refresh browser when scene becomes active".
+   - YouTube (16:9): URL `http://127.0.0.1:8787/?title=Your%20title`, 1920×1080.
+   - TikTok / Shorts (9:16): URL `http://127.0.0.1:8787/?format=vertical&title=Your%20title`, 1080×1920, with a vertical canvas in OBS (Settings → Video → 1080×1920).
 5. **Audio in OBS:**
-   - Windows: add *Application Audio Capture* → Chrome.
-   - macOS/Linux: add *Desktop Audio*.
-   - The avatars follow X's own waveform, so they're in sync with what Chrome plays.
-6. Stream from OBS to YouTube, Twitch or X as usual.
+   - Windows: *Application Audio Capture* → Chrome.
+   - macOS/Linux: *Desktop Audio*.
+   - The mouths follow X's own waveform, so they're in sync with what Chrome plays.
 
 Stage URL options:
-- `?demo=1`: fake speakers, to set up OBS without a live Space.
-- `?bg=transparent`: transparent background, for your own scene.
-- `?bg=%23000000`: any background colour.
-- `?names=0`: hide the names.
+- `?demo=1`: fake speakers with drawn faces, for setting up OBS without a live Space.
+- `?format=vertical`: 1080×1920.
+- `?title=…`: the header title.
+- `?bg=transparent`: transparent background.
+- `?body=0`: heads only.
+- `?lang=en`: English labels.
+- `?mouth=0.3`: the fallback mouth line, for photos without a detectable face.
+
+The relay also proxies X profile photos (`/avatar?u=`, only `*.twimg.com`) so the stage can read their pixels, and serves MediaPipe from `node_modules`.
 
 ## Build
 
 ```bash
 npm run check   # validate manifest, referenced files, JS syntax
 npm run relay   # local relay + stage for OBS (after npm install)
-npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.3.1.zip
+npm run build   # check + copy to dist/x-spaces-probe/ + dist/x-spaces-probe-0.4.0.zip
 ```
 
 Nothing needs installing. You can also load `extension/` directly, without building.
@@ -143,6 +153,6 @@ extension/
   offscreen.js     getUserMedia(tab) → AnalyserNode → level; replays audio to speakers
   content.js       discovery, panel, speaking state, OBSERVE instrumentation, export
 relay/server.mjs   local WebSocket relay + static server for the stage (npm run relay)
-stage/             OBS stage: index.html, stage.js (avatars + gestures), stage.css
+stage/             OBS stage: animated talk show (index.html, stage.js, stage.css)
 scripts/build.mjs  validation + packaging
 ```
